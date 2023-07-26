@@ -14,8 +14,6 @@ const PORT = process.env.PORT || 3000
 
 // Initialisation des middlewares globaux
 
-// Initialize redis client
-// app.set("redis", redisClient)
 const app = express()
 const server = http.createServer(app)
 
@@ -109,45 +107,47 @@ socket.on("gameStart", (data) => {
 
   // Set Timeout for the first question
   setTimeout(() => {
-    io.emit("firstQuestion", {
-      roomId: data.roomId,
-      question: Quizzes[Rooms.get(data.roomId).type - 1][0],
-    });
-
+   
+    if(GameState.get(data.roomId)===0){
+      io.emit("nextQuestion", {
+        roomId: data.roomId,
+        question: Quizzes[Rooms.get(data.roomId).type - 1][0],
+      });
+    }
+  },3000)
     // Ten Seconds after the second Question
-    setTimeout(() => {
-      const intervalId = setInterval(() => {
-        const currentQuestionIndex = GameState.get(data.roomId);
-        io.emit("nextQuestion", {
+    socket.on("nextQuestion",(data)=>{
+      console.log("trigger")
+      const currentQuestionIndex = GameState.get(data.roomId);
+      io.emit("nextQuestion", {
+        roomId: data.roomId,
+        question: Quizzes[Rooms.get(data.roomId).type - 1][currentQuestionIndex + 1],
+      });
+      GameState.set(data.roomId, currentQuestionIndex + 1);
+
+      // Keep track of the total number of questions in the game
+      const totalQuestions = Quizzes.length;
+
+      // Check if all questions have been answered
+      if (currentQuestionIndex + 1 >= totalQuestions) {
+        // All questions have been answered, so emit the gameEnd event
+        io.emit("gameEnd", {
           roomId: data.roomId,
-          question: Quizzes[Rooms.get(data.roomId).type - 1][currentQuestionIndex + 1],
+          
         });
-        GameState.set(data.roomId, currentQuestionIndex + 1);
+        setTimeout(() =>{
+    io.emit("ranking",{
+      roomId : data.roomId ,
+      rankings : Ranking(Rooms.get(data.roomId).participants)
+    })
+    Rooms.delete(data.roomId)
+        },2000)
 
-        // Keep track of the total number of questions in the game
-        const totalQuestions = Quizzes.length;
-
-        // Check if all questions have been answered
-        if (currentQuestionIndex + 1 >= totalQuestions) {
-          // All questions have been answered, so emit the gameEnd event
-          io.emit("gameEnd", {
-            roomId: data.roomId,
-            
-          });
-          setTimeout(() =>{
-      io.emit("ranking",{
-        roomId : data.roomId ,
-        rankings : Ranking(Rooms.get(data.roomId).participants)
-      })
-      Rooms.delete(data.roomId)
-          },2000)
-
-          // Clear the interval to stop emitting more questions
-          clearInterval(intervalId);
-        }
-      }, 10000);
-    }, 10000);
-  }, 3000);
+        
+      }
+    })
+     
+  
 });
 
 // Handle the "userAnswer" event
