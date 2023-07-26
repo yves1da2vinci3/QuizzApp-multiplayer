@@ -1,0 +1,33 @@
+{
+  "name": "quizzapp-multiplayer",
+  "version": "1.0.0",
+  "description": "this is the backend of online mutliplayer game",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "live" : "nodemon server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yves1da2vinci3/QuizzApp-multiplayer.git"
+  },
+  "keywords": [
+    "game",
+    "reatime",
+    "multiplayer"
+  ],
+  "author": "yvesdavinci",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yves1da2vinci3/QuizzApp-multiplayer/issues"
+  },
+  "homepage": "https://github.com/yves1da2vinci3/QuizzApp-multiplayer#readme",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "nodemon": "^3.0.1",
+    "socket.io": "^4.7.1"
+  }
+}
