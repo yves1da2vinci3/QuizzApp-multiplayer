@@ -1,8 +1,10 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
+
 import { Quizzes } from "./quizz.js";
 import Ranking from "./ranking.js";
+import { generateQuiz } from "./utils/mistral-client.js";
 
 const PORT = process.env.PORT || 3000;
 
@@ -11,11 +13,11 @@ const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: {
-    origin: "*"
-  }
+    origin: "*",
+  },
 });
 
-app.use(express.static('public'));
+app.use(express.static("public"));
 app.use(express.json());
 
 const Rooms = new Map();
@@ -24,11 +26,11 @@ const UserAnswers = new Map();
 
 function createRoom(socket, data) {
   const { roomId, name, type } = data;
-  
+
   if (Rooms.has(roomId)) {
     socket.emit("feedbackCreatingRoom", {
       status: "failed",
-      message: "Room already exists"
+      message: "Room already exists",
     });
     return;
   }
@@ -36,12 +38,13 @@ function createRoom(socket, data) {
   Rooms.set(roomId, {
     adminName: name,
     type: type,
-    participants: [{ name, points: 0 }]
+    participants: [{ name, points: 0 }],
+    quiz: null,
   });
 
   socket.emit("feedbackCreatingRoom", {
     status: "success",
-    roomId: roomId
+    roomId: roomId,
   });
 }
 
@@ -51,7 +54,7 @@ function joinRoom(socket, data) {
   if (!Rooms.has(roomId)) {
     socket.emit("feedbackJoiningRoom", {
       status: "failed",
-      message: `${roomId} is not available`
+      message: `${roomId} is not available`,
     });
     return;
   }
@@ -62,12 +65,29 @@ function joinRoom(socket, data) {
   io.emit("updateWaitingRoom", { roomId, room });
   socket.emit("feedbackJoiningRoom", {
     status: "success",
-    message: "Successfully joined"
+    message: "Successfully joined",
   });
 }
 
-function startGame(socket, data) {
+async function startGame(socket, data) {
   const { roomId } = data;
+  const room = Rooms.get(roomId);
+
+  if (!room.quiz) {
+    socket.emit("gameStarting", { roomId, message: "Generating quiz..." });
+
+    const generatedQuiz = await generateQuiz(room.type, 5);
+    if (generatedQuiz) {
+      room.quiz = generatedQuiz;
+    } else {
+      socket.emit("gameStartFailed", {
+        roomId,
+        message: "Failed to generate quiz. Using default questions.",
+      });
+      room.quiz = Quizzes[room.type - 1];
+    }
+  }
+
   GameState.set(roomId, 0);
   UserAnswers.set(roomId, new Set());
   io.emit("gameStart", { roomId });
@@ -82,7 +102,7 @@ function startGame(socket, data) {
 function sendNextQuestion(roomId) {
   const currentQuestionIndex = GameState.get(roomId);
   const room = Rooms.get(roomId);
-  const quiz = Quizzes[room.type - 1];
+  const quiz = room.quiz;
 
   if (currentQuestionIndex >= quiz.length) {
     endGame(roomId);
@@ -100,11 +120,11 @@ function sendNextQuestion(roomId) {
 
 function endGame(roomId) {
   io.emit("gameEnd", { roomId });
-  
+
   setTimeout(() => {
     io.emit("ranking", {
       roomId: roomId,
-      rankings: Ranking(Rooms.get(roomId).participants)
+      rankings: Ranking(Rooms.get(roomId).participants),
     });
     Rooms.delete(roomId);
     GameState.delete(roomId);
@@ -116,10 +136,12 @@ function handleUserAnswer(socket, data) {
   const { roomId, answer, name } = data;
   const room = Rooms.get(roomId);
   const currentQuestionIndex = GameState.get(roomId) - 1;
-  const quiz = Quizzes[room.type - 1];
+  const quiz = room.quiz;
 
   if (quiz[currentQuestionIndex].correctOption === answer) {
-    const participantIndex = room.participants.findIndex(p => p.name === name);
+    const participantIndex = room.participants.findIndex(
+      (p) => p.name === name
+    );
     if (participantIndex !== -1) {
       room.participants[participantIndex].points += 10;
     }
@@ -127,36 +149,35 @@ function handleUserAnswer(socket, data) {
 
   io.emit("userAnswered", { roomId, user: socket.id, answer, name });
 
-  // Add user to the set of users who have answered
   UserAnswers.get(roomId).add(name);
 
-  // Check if all users have answered
   if (UserAnswers.get(roomId).size === room.participants.length) {
-    // Move to the next question immediately
     sendNextQuestion(roomId);
   }
 }
 
-io.on('connection', socket => {
+io.on("connection", (socket) => {
   console.log("New socket connected:", socket.id);
 
-  socket.on("createRoom", data => createRoom(socket, data));
-  socket.on("joinRoom", data => joinRoom(socket, data));
-  socket.on("joinWaitingRoom", data => {
+  socket.on("createRoom", (data) => createRoom(socket, data));
+  socket.on("joinRoom", (data) => joinRoom(socket, data));
+  socket.on("joinWaitingRoom", (data) => {
     const room = Rooms.get(data.roomId);
     socket.emit("feedbackWaiting", { roomId: data.roomId, room });
   });
-  socket.on("gameStart", data => startGame(socket, data));
-  socket.on("nextQuestion", data => sendNextQuestion(data.roomId));
-  socket.on("userAnswer", data => handleUserAnswer(socket, data));
+  socket.on("gameStart", (data) => startGame(socket, data));
+  socket.on("nextQuestion", (data) => sendNextQuestion(data.roomId));
+  socket.on("userAnswer", (data) => handleUserAnswer(socket, data));
 });
 
 app.get("/healthcheck", (req, res) => {
   res.json({ message: "Server is healthy" });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-}).on('error', (err) => {
-  console.error('Failed to start server:', err);
-});
+server
+  .listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+  })
+  .on("error", (err) => {
+    console.error("Failed to start server:", err);
+  });
