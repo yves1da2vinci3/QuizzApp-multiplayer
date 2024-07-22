@@ -11,7 +11,7 @@ const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000'
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000' || "https://onlinequizzapp.netlify.app/"
   }
 });
 
