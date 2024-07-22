@@ -3,187 +3,160 @@ import http from "http";
 import { Server } from "socket.io";
 import { Quizzes } from "./quizz.js";
 import Ranking from "./ranking.js";
-// Route importation
 
+const PORT = process.env.PORT || 3000;
 
+const app = express();
+const server = http.createServer(app);
 
-const PORT = process.env.PORT || 3000
-
-
-// const redisClient = redis.createClient()
-
-// Initialisation des middlewares globaux
-
-const app = express()
-const server = http.createServer(app)
-
-
-  // initialisation du socket Server
-  export const io = new Server(server,{
-    cors : {
-        origin :'*'
-    }
-  });
-  
-
-  
-app.use(express.static('public'));
-
-const Rooms = new Map()
-const GameState = new Map()
-// socket.io server
-io.on('connection',socket =>{
-  console.log( "new socket Connected :", socket.id) 
-  // create room
-  socket.on("createRoom",(data)=> {
-    console.log("first room created : ",data.roomId)
-    
-    // create room
-     Rooms.set(data.roomId,{
-      adminName : data.name,
-      type : data.type,
-      participants : [
-        {
-        name : data.name,
-        points : 0
-      } 
-    ]
-     })
-// Send feedback
-     socket.emit("feedbackCreatingRoom",{
-      status : "success",
-      roomId : data.roomId
-     })
-  })
-
-  // ** Join Room
-  socket.on("joinRoom",(data)=>{
-    console.log("cest dosee")
-    if(!Rooms.has(data.roomId)){
-      socket.emit("feedbackJoiningRoom",{
-        status : "failed",
-        message : `${data.roomId} is not available`
-       })
-    }else{
-      const room = Rooms.get(data.roomId)
-      room.participants.push( 
-         {
-        name : data.name,
-        points : 0
-      } )
-
-      Rooms.set(data.roomId, room)
-      io.emit("updateWaitingRoom",{
-        roomId : data.roomId,
-        room
-       })
-      //  
-      socket.emit("feedbackJoiningRoom",{
-        status : "success",
-        message : `successfully JOIND`
-       })
-    
-    }
-  })
-
-  // ** waiting room
-  socket.on("joinWaitingRoom",(data) =>{
-    console.log("joing waiting room")
-    const room = Rooms.get(data.roomId)
-    socket.emit("feedbackWaiting",{
-      roomId : data.roomId,
-      room
-    })
-  })
-
-  //** Game Management
-// Handle the "gameStart" event
-socket.on("gameStart", (data) => {
-  // Current Question 
-  GameState.set(data.roomId, 0);
-  io.emit("gameStart", {
-    roomId: data.roomId,
-  });
-
-  // Set Timeout for the first question
-  setTimeout(() => {
-   
-    if(GameState.get(data.roomId)===0){
-      io.emit("nextQuestion", {
-        roomId: data.roomId,
-        question: Quizzes[Rooms.get(data.roomId).type - 1][0],
-      });
-    }
-  },3000)
-    // Ten Seconds after the second Question
-    socket.on("nextQuestion",(data)=>{
-      console.log("trigger")
-      const currentQuestionIndex = GameState.get(data.roomId);
-      io.emit("nextQuestion", {
-        roomId: data.roomId,
-        question: Quizzes[Rooms.get(data.roomId).type - 1][currentQuestionIndex + 1],
-      });
-      GameState.set(data.roomId, currentQuestionIndex + 1);
-
-      // Keep track of the total number of questions in the game
-      const totalQuestions = Quizzes.length;
-
-      // Check if all questions have been answered
-      if (currentQuestionIndex + 1 >= totalQuestions) {
-        // All questions have been answered, so emit the gameEnd event
-        io.emit("gameEnd", {
-          roomId: data.roomId,
-          
-        });
-        setTimeout(() =>{
-    io.emit("ranking",{
-      roomId : data.roomId ,
-      rankings : Ranking(Rooms.get(data.roomId).participants)
-    })
-    Rooms.delete(data.roomId)
-        },2000)
-
-        
-      }
-    })
-     
-  
-});
-
-// Handle the "userAnswer" event
-socket.on("userAnswer", (data) => {
-  const { roomId, answer, name } = data;
-  // Here you can validate the user's answer, check if it's correct, and update the user's score or perform other actions as needed.
-  const room = Rooms.get(roomId);
-  if (Quizzes[room.type - 1][GameState.get(roomId)].correctOption === answer) {
-    const Index = room.participants.findIndex((pa) => pa.name === name);
-    room.participants[Index].points += 10; // Fix: Use the "+=" operator to add 10 to the existing score
-    Rooms.set(roomId, room);
+export const io = new Server(server, {
+  cors: {
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000'
   }
-  // Emit to all clients that a user has answered the question
-  io.emit("userAnswered", {
-    roomId: roomId,
-    user: socket.id, // You can send the user's ID or name if available
-    answer: answer,
-    name
-  });
 });
 
+app.use(express.static('public'));
+app.use(express.json());
 
-app.get("/healthcheck",(req,res)=> {
-  return res.json({message : "everything seems ok"})
-})
+const Rooms = new Map();
+const GameState = new Map();
+const UserAnswers = new Map();
 
+function createRoom(socket, data) {
+  const { roomId, name, type } = data;
+  
+  if (Rooms.has(roomId)) {
+    socket.emit("feedbackCreatingRoom", {
+      status: "failed",
+      message: "Room already exists"
+    });
+    return;
+  }
 
+  Rooms.set(roomId, {
+    adminName: name,
+    type: type,
+    participants: [{ name, points: 0 }]
+  });
 
+  socket.emit("feedbackCreatingRoom", {
+    status: "success",
+    roomId: roomId
+  });
+}
 
+function joinRoom(socket, data) {
+  const { roomId, name } = data;
 
+  if (!Rooms.has(roomId)) {
+    socket.emit("feedbackJoiningRoom", {
+      status: "failed",
+      message: `${roomId} is not available`
+    });
+    return;
+  }
 
+  const room = Rooms.get(roomId);
+  room.participants.push({ name, points: 0 });
 
-})
+  io.emit("updateWaitingRoom", { roomId, room });
+  socket.emit("feedbackJoiningRoom", {
+    status: "success",
+    message: "Successfully joined"
+  });
+}
 
+function startGame(socket, data) {
+  const { roomId } = data;
+  GameState.set(roomId, 0);
+  UserAnswers.set(roomId, new Set());
+  io.emit("gameStart", { roomId });
 
+  setTimeout(() => {
+    if (GameState.get(roomId) === 0) {
+      sendNextQuestion(roomId);
+    }
+  }, 3000);
+}
 
-  server.listen(PORT,()=>{
-    console.log("Starting listening on port " + PORT);
-})
+function sendNextQuestion(roomId) {
+  const currentQuestionIndex = GameState.get(roomId);
+  const room = Rooms.get(roomId);
+  const quiz = Quizzes[room.type - 1];
+
+  if (currentQuestionIndex >= quiz.length) {
+    endGame(roomId);
+    return;
+  }
+
+  io.emit("nextQuestion", {
+    roomId: roomId,
+    question: quiz[currentQuestionIndex],
+  });
+
+  GameState.set(roomId, currentQuestionIndex + 1);
+  UserAnswers.set(roomId, new Set());
+}
+
+function endGame(roomId) {
+  io.emit("gameEnd", { roomId });
+  
+  setTimeout(() => {
+    io.emit("ranking", {
+      roomId: roomId,
+      rankings: Ranking(Rooms.get(roomId).participants)
+    });
+    Rooms.delete(roomId);
+    GameState.delete(roomId);
+    UserAnswers.delete(roomId);
+  }, 2000);
+}
+
+function handleUserAnswer(socket, data) {
+  const { roomId, answer, name } = data;
+  const room = Rooms.get(roomId);
+  const currentQuestionIndex = GameState.get(roomId) - 1;
+  const quiz = Quizzes[room.type - 1];
+
+  if (quiz[currentQuestionIndex].correctOption === answer) {
+    const participantIndex = room.participants.findIndex(p => p.name === name);
+    if (participantIndex !== -1) {
+      room.participants[participantIndex].points += 10;
+    }
+  }
+
+  io.emit("userAnswered", { roomId, user: socket.id, answer, name });
+
+  // Add user to the set of users who have answered
+  UserAnswers.get(roomId).add(name);
+
+  // Check if all users have answered
+  if (UserAnswers.get(roomId).size === room.participants.length) {
+    // Move to the next question immediately
+    sendNextQuestion(roomId);
+  }
+}
+
+io.on('connection', socket => {
+  console.log("New socket connected:", socket.id);
+
+  socket.on("createRoom", data => createRoom(socket, data));
+  socket.on("joinRoom", data => joinRoom(socket, data));
+  socket.on("joinWaitingRoom", data => {
+    const room = Rooms.get(data.roomId);
+    socket.emit("feedbackWaiting", { roomId: data.roomId, room });
+  });
+  socket.on("gameStart", data => startGame(socket, data));
+  socket.on("nextQuestion", data => sendNextQuestion(data.roomId));
+  socket.on("userAnswer", data => handleUserAnswer(socket, data));
+});
+
+app.get("/healthcheck", (req, res) => {
+  res.json({ message: "Server is healthy" });
+});
+
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+}).on('error', (err) => {
+  console.error('Failed to start server:', err);
+});
