@@ -39,6 +39,7 @@ function createRoom(socket, data) {
     adminName: name,
     type: type,
     participants: [{ name, points: 0 }],
+    quizNumber: 5,
     quiz: null,
   });
 
@@ -74,13 +75,13 @@ async function startGame(socket, data) {
   const room = Rooms.get(roomId);
 
   if (!room.quiz) {
-    socket.emit("gameStarting", { roomId, message: "Generating quiz..." });
+    io.emit("gameStarting", { roomId, message: "Generating quiz..." });
 
-    const generatedQuiz = await generateQuiz(room.type, 5);
+    const generatedQuiz = await generateQuiz(room.type, room.quizNumber);
     if (generatedQuiz) {
       room.quiz = generatedQuiz;
     } else {
-      socket.emit("gameStartFailed", {
+      io.emit("gameStartFailed", {
         roomId,
         message: "Failed to generate quiz. Using default questions.",
       });
@@ -156,6 +157,14 @@ function handleUserAnswer(socket, data) {
   }
 }
 
+function UpdateRoomSettings(socket, data) {
+  const { questionsNumber, roomType, roomId } = data;
+  const room = Rooms.get(roomId);
+  room.type = roomType;
+  room.quizNumber = questionsNumber;
+  io.emit("updateRoomSettings", { roomId });
+}
+
 io.on("connection", (socket) => {
   console.log("New socket connected:", socket.id);
 
@@ -163,11 +172,12 @@ io.on("connection", (socket) => {
   socket.on("joinRoom", (data) => joinRoom(socket, data));
   socket.on("joinWaitingRoom", (data) => {
     const room = Rooms.get(data.roomId);
-    socket.emit("feedbackWaiting", { roomId: data.roomId, room });
+    io.emit("feedbackWaiting", { roomId: data.roomId, room });
   });
   socket.on("gameStart", (data) => startGame(socket, data));
   socket.on("nextQuestion", (data) => sendNextQuestion(data.roomId));
   socket.on("userAnswer", (data) => handleUserAnswer(socket, data));
+  socket.on("updateRoomSettings", (data) => UpdateRoomSettings(socket, data));
 });
 
 app.get("/healthcheck", (req, res) => {
