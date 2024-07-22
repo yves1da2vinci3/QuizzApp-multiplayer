@@ -170,6 +170,9 @@ socket.on("userAnswer", (data) => {
 });
 
 
+app.get("/healthcheck",(req,res)=> {
+  return res.json({message : "everything seems ok"})
+})
 
 
 
